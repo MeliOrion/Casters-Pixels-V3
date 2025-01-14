@@ -5,80 +5,73 @@ const BASE_URL = 'https://api.stability.ai/v1';
 export const PFP_CATEGORIES = {
   characterBase: {
     random: "random character base",
-    human: "realistic human portrait",
-    anime: "anime character portrait",
-    pixel: "detailed pixel art character",
-    abstract: "abstract geometric avatar",
-    cyberpunk: "cyberpunk character portrait",
-    fantasy: "mystical fantasy being",
-    animal: "anthropomorphic animal portrait"
+    human: "head and shoulders portrait of a realistic human",
+    anime: "head and shoulders portrait of an anime character",
+    pixel: "head and shoulders portrait in detailed pixel art",
+    abstract: "head and shoulders abstract geometric avatar",
+    cyberpunk: "head and shoulders portrait of a cyberpunk character",
+    fantasy: "head and shoulders portrait of a mystical fantasy being",
+    animal: "head and shoulders portrait of an anthropomorphic animal"
   },
   artStyle: {
     random: "random art style",
-    neoTokyo: "neo-tokyo futuristic",
-    vaporwave: "vaporwave aesthetic",
-    retroPixel: "retro pixel art",
-    painterly: "digital painterly",
-    minimalist: "clean minimalist",
-    cyberpunk: "high-tech cyberpunk",
-    matrix: "matrix digital rain inspired",
-    glitch: "artistic glitch art"
+    neoTokyo: "neo-tokyo futuristic style, clean sharp details",
+    vaporwave: "vaporwave aesthetic with bold contrasts",
+    retroPixel: "retro pixel art with crisp edges",
+    painterly: "detailed digital painting style",
+    minimalist: "clean minimalist design with bold features",
+    cyberpunk: "high-tech cyberpunk with neon accents",
+    matrix: "matrix digital style with code elements",
+    glitch: "artistic glitch effects around edges"
   },
   personality: {
     random: "random personality",
-    mysterious: "enigmatic expression, subtle smile",
-    confident: "confident pose, strong gaze",
-    playful: "playful expression, light-hearted",
-    serious: "serious demeanor, focused gaze",
-    ethereal: "ethereal presence, dreamy expression",
-    powerful: "powerful stance, commanding presence",
-    eccentric: "eccentric character, unique expression",
-    zen: "peaceful expression, calm demeanor"
+    mysterious: "mysterious expression with raised eyebrow",
+    confident: "confident three-quarter view pose",
+    playful: "playful smirk and tilted head",
+    serious: "serious side profile view",
+    ethereal: "ethereal front-facing pose",
+    powerful: "powerful slight upward angle",
+    eccentric: "eccentric expression with unique features",
+    zen: "peaceful forward-facing composition"
   },
   visualElements: {
     random: "random visual elements",
-    aura: "glowing energy aura",
-    pattern: "intricate background patterns",
-    lighting: "dramatic lighting effects",
-    particles: "floating particle effects",
-    geometric: "geometric design elements",
-    energyField: "surrounding energy field",
-    tech: "technological interface elements",
-    nature: "organic natural elements"
+    aura: "vibrant energy aura behind head",
+    pattern: "patterned background with character centered",
+    lighting: "dramatic rim lighting on face",
+    particles: "floating particles around head area",
+    geometric: "geometric shapes framing portrait",
+    hologram: "holographic overlay effects",
+    tech: "tech interface elements in background",
+    nature: "organic elements framing portrait"
   },
   colorScheme: {
     random: "random color scheme",
-    neon: "vibrant neon colors, dark background",
-    pastel: "soft pastel color palette",
-    mono: "striking monochromatic scheme",
-    cyber: "cyberpunk color palette",
-    earth: "rich earth tone colors",
-    ethereal: "ethereal glowing colors",
-    matrix: "matrix green and black",
-    crystal: "crystal clear iridescent"
-  },
-  accessories: {
-    random: "random accessories",
-    cyber: "cybernetic implants and augmentations",
-    mystical: "mystical artifacts and symbols",
-    tech: "advanced technological gadgets",
-    crown: "elaborate digital crown",
-    visor: "high-tech visor or glasses",
-    mask: "ethereal glowing mask",
-    digital: "digital holographic elements",
-    weapon: "energy weapon or staff"
+    neon: "vibrant neon accents on dark background",
+    pastel: "soft pastel tones with subtle gradients",
+    monochrome: "high contrast monochromatic palette",
+    cyberpunk: "cyberpunk neons with deep shadows",
+    ethereal: "iridescent colors with light bloom",
+    nature: "rich natural tones with warm highlights",
+    royal: "luxurious royal colors with metallic accents",
+    retro: "retro color palette with muted tones"
   }
 };
 
-function generatePrompt(): string {
-  const base = getRandomFromCategory(PFP_CATEGORIES.characterBase);
-  return `Create a high quality profile picture featuring ${base}. 
-  Ensure the focus is on the character with strong portraiture composition.`;
+export function generatePrompt(): string {
+  const character = getRandomFromCategory(PFP_CATEGORIES.characterBase);
+  const style = getRandomFromCategory(PFP_CATEGORIES.artStyle);
+  const personality = getRandomFromCategory(PFP_CATEGORIES.personality);
+  const elements = getRandomFromCategory(PFP_CATEGORIES.visualElements);
+  const colors = getRandomFromCategory(PFP_CATEGORIES.colorScheme);
+
+  return `Create a profile picture in NFT style: ${character}, ${style}, ${personality}, ${elements}, ${colors}. Centered composition, high detail, perfect for PFP. Subject fills 70% of frame, clean background, professional lighting.`;
 }
 
 function getRandomFromCategory(category: Record<string, string>): string {
-  const options = Object.values(category).filter(item => item !== "random");
-  return options[Math.floor(Math.random() * options.length)];
+  const values = Object.values(category);
+  return values[Math.floor(Math.random() * values.length)];
 }
 
 export class StabilityService {
@@ -86,42 +79,56 @@ export class StabilityService {
 
   constructor() {
     this.apiKey = process.env.NEXT_PUBLIC_STABILITY_API_KEY as string;
+    if (!this.apiKey) {
+      console.error('Missing STABILITY_API_KEY environment variable');
+    }
   }
 
-  async generateImage(isRemix = false, referenceImage?: string): Promise<string> {
+  async generateImage(prompt: string, negativePrompt: string = ''): Promise<string> {
     try {
-      const endpoint = isRemix ? '/generation/image-to-image' : '/generation/text-to-image';
-      
-      const body: any = {
-        height: 1024,
-        width: 1024,
-        cfg_scale: 7,
-        steps: 50,
-        samples: 1,
-        prompt: isRemix ? "Create a unique artistic remix while maintaining core style" : generatePrompt(),
-      };
-
-      if (isRemix && referenceImage) {
-        body.init_image = referenceImage;
-      }
-
-      const response = await fetch(`${BASE_URL}${endpoint}`, {
+      const response = await fetch(`${BASE_URL}/generation/stable-diffusion-xl-1024-v1-0/text-to-image`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          Accept: 'application/json',
           Authorization: `Bearer ${this.apiKey}`,
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          text_prompts: [
+            {
+              text: prompt,
+              weight: 1
+            },
+            {
+              text: negativePrompt,
+              weight: -1
+            }
+          ],
+          cfg_scale: 8.5,
+          clip_guidance_preset: 'FAST_BLUE',
+          height: 1024,
+          width: 1024,
+          samples: 1,
+          steps: 30,
+          style_preset: "pixel-art"
+        }),
       });
 
       if (!response.ok) {
-        throw new Error(`Stability API error: ${response.statusText}`);
+        const error = await response.json();
+        console.error('Stability API error:', error);
+        throw new Error(error.message || `Failed to generate image: ${response.statusText}`);
       }
 
       const result = await response.json();
-      return result.artifacts[0].base64;
+      if (!result.artifacts?.[0]?.base64) {
+        console.error('No image data in response:', result);
+        throw new Error('No image data in response');
+      }
+
+      return `data:image/png;base64,${result.artifacts[0].base64}`;
     } catch (error) {
-      console.error('Error generating image:', error);
+      console.error('Failed to generate image:', error);
       throw error;
     }
   }

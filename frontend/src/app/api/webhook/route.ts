@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { AlchemyService } from '@/services/alchemy';
+import { AlchemyService } from '../../../services/alchemy';
+import { CASTER_TOKEN_ADDRESS } from '../../../constants/addresses';
 
 const alchemyService = new AlchemyService(
   process.env.NEXT_PUBLIC_ALCHEMY_API_KEY!,

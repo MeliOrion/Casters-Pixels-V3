@@ -1,547 +1,404 @@
 'use client';
 
+import { useState, useEffect, useRef } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useAccount, useContractRead, useContractWrite, useWaitForTransaction, useBlockNumber } from 'wagmi';
-import { formatEther } from 'viem';
-import { CASTERS_PIXELS_ABI, ERC20_ABI } from '../constants/abis';
+import { Address, useAccount, useContractRead, useContractWrite, usePrepareContractWrite, useWaitForTransaction } from 'wagmi';
 import { CONTRACT_ADDRESS, CASTER_TOKEN_ADDRESS } from '../constants/addresses';
-import { useTokenBalance } from '../hooks/useTokenBalance';
-import { useTransactionHandler } from '../hooks/useTransactionHandler';
-import { useContractEvents } from '../hooks/useContractEvents';
-import { StatusUpdate } from '../hooks/useContractEvents';
-import { NetworkStatus } from '../components/NetworkStatus';
+import { useTokenAllowance } from '../hooks/useTokenAllowance';
+import { useTokenApprove } from '../hooks/useTokenApprove';
 import { Stats } from '../components/Stats';
-import { StatusUpdates } from '../components/StatusUpdates';
-import { TransactionModal } from '../components/TransactionModal';
-import { ImageUpload } from '../components/ImageUpload';
+import { ParticleBackground } from '../components/ParticleBackground';
+import { CASTERS_PIXELS_ABI, ERC20_ABI } from '../constants/abis';
 import { StabilityService } from '../services/stability';
-import { AlchemyService } from '../services/alchemy';
+import Image from 'next/image';
+import { formatEther } from 'viem';
+import { decodeEventLog } from 'viem';
+import { generatePrompt } from '../services/stability';
+import { generatePFPPrompt, negativePrompt } from '../utils/prompts';
+import '../styles/neon.css';
 
 export default function Home() {
-  const [mounted, setMounted] = useState(false);
-  const [imageUrl, setImageUrl] = useState<string>('');
-  const [hasPending, setHasPending] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isApproving, setIsApproving] = useState(false);
-  const [isCompleting, setIsCompleting] = useState(false);
-  const [remixImage, setRemixImage] = useState<string | null>(null);
-  const [statusUpdates, setStatusUpdates] = useState<StatusUpdate[]>([]);
-  const [generatedHash, setGeneratedHash] = useState<string>('');
-  const stabilityServiceRef = useRef<StabilityService | null>(null);
-  const alchemyServiceRef = useRef<AlchemyService | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const { address, isConnected } = useAccount();
+  const [isProcessingGeneration, setIsProcessingGeneration] = useState(false);
+  const [processedTxHashes] = useState(new Set<string>());
+  const [isTransactionProcessing, setIsTransactionProcessing] = useState(false);
+  const [isCompletionProcessing, setIsCompletionProcessing] = useState(false);
 
-  const { address } = useAccount();
-  const {
-    txState,
-    handleError: handleTxError,
-    startTransaction,
-    updateTransaction,
-    completeTransaction,
-    closeModal
-  } = useTransactionHandler();
+  const stabilityService = useRef<StabilityService>(new StabilityService());
 
-  const handleContractError = (error: any) => {
-    console.error('Error:', error);
-    let message = 'An unknown error occurred';
-
-    if (error.message?.includes('User rejected the request')) {
-      message = 'Transaction was cancelled';
-    } else if (error.message?.includes('insufficient allowance')) {
-      message = 'Please approve CASTER tokens first';
-    } else if (error.message?.includes('Already has pending generation')) {
-      message = 'You already have a pending generation';
-    } else if (error.message?.includes('Must wait for blocks')) {
-      message = 'Please wait for more blocks before completing';
-    } else if (error.message?.includes('No pending generation')) {
-      message = 'No pending generation found';
-    } else if (error.message?.includes('Insufficient CASTER balance')) {
-      message = 'You need at least 1000 CASTER tokens to generate';
-    } else if (error.message?.includes('Transfer failed')) {
-      message = 'Token transfer failed. Please try again';
-    } else if (error.message?.includes('could not be found')) {
-      message = 'Transaction was dropped. Please try again';
-    } else if (error.data?.message) {
-      message = error.data.message;
-    } else if (error.message) {
-      message = error.message;
-    }
-
-    handleTxError(message);
-  };
-
-  useEffect(() => {
-    if (!stabilityServiceRef.current) {
-      stabilityServiceRef.current = new StabilityService();
-    }
-
-    if (process.env.NEXT_PUBLIC_STABILITY_API_KEY) {
-      stabilityServiceRef.current = new StabilityService(
-        process.env.NEXT_PUBLIC_STABILITY_API_KEY
-      );
-    }
-
-    if (process.env.NEXT_PUBLIC_ALCHEMY_API_KEY && process.env.NEXT_PUBLIC_CASTER_TOKEN_ADDRESS) {
-      alchemyServiceRef.current = new AlchemyService(
-        process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
-        process.env.NEXT_PUBLIC_CASTER_TOKEN_ADDRESS
-      );
-    }
-    setMounted(true);
-  }, []);
-
-  // Contract reads
-  const { data: balance } = useTokenBalance(
-    CASTER_TOKEN_ADDRESS,
-    address
-  );
-
-  const { data: allowance } = useTokenBalance(
-    CASTER_TOKEN_ADDRESS,
-    address,
-    CONTRACT_ADDRESS
-  );
-
-  const { data: generationCost } = useContractRead({
-    address: CONTRACT_ADDRESS,
-    abi: CASTERS_PIXELS_ABI,
-    functionName: 'GENERATION_COST',
-    watch: true,
-  });
-
-  const { data: hasPendingGeneration } = useContractRead({
-    address: CONTRACT_ADDRESS,
+  const { data: hasPending = false, isLoading: isPendingLoading, isError: isPendingError } = useContractRead({
+    address: CONTRACT_ADDRESS as Address,
     abi: CASTERS_PIXELS_ABI,
     functionName: 'hasPendingGeneration',
-    args: [address],
+    args: [address as Address],
+    enabled: isConnected && !!address,
     watch: true,
   });
 
-  const { data: userBlockNumber } = useContractRead({
-    address: CONTRACT_ADDRESS,
-    abi: CASTERS_PIXELS_ABI,
-    functionName: 'userBlockNumber',
-    args: [address || '0x'],
-    enabled: !!address,
-  });
-
-  const { data: blockWait } = useContractRead({
-    address: CONTRACT_ADDRESS,
-    abi: CASTERS_PIXELS_ABI,
-    functionName: 'BLOCK_WAIT',
-    enabled: true,
-  });
-
-  const { data: currentBlock } = useBlockNumber();
-
-  const canComplete = useMemo(() => {
-    if (!userBlockNumber || !blockWait || !currentBlock) return false;
-    return currentBlock >= (userBlockNumber + blockWait);
-  }, [userBlockNumber, blockWait, currentBlock]);
-
-  // Contract writes
-  const { writeAsync: approve } = useContractWrite({
-    address: CASTER_TOKEN_ADDRESS,
-    abi: ERC20_ABI,
-    functionName: 'approve',
-  });
-
-  const { writeAsync: requestGeneration, data: requestData } = useContractWrite({
-    address: CONTRACT_ADDRESS,
-    abi: CASTERS_PIXELS_ABI,
-    functionName: 'requestGeneration',
-  });
-
-  const { writeAsync: completeGeneration, data: completeData } = useContractWrite({
-    address: CONTRACT_ADDRESS,
+  const { config: completeConfig } = usePrepareContractWrite({
+    address: CONTRACT_ADDRESS as Address,
     abi: CASTERS_PIXELS_ABI,
     functionName: 'completeGeneration',
+    enabled: isConnected && !!address && hasPending,
+    gas: undefined, // Let Base estimate gas
+    gasPrice: undefined, // Use network's suggested gas price
   });
 
-  // Transaction handlers
-  const { isLoading: isRequestPending } = useWaitForTransaction({
-    hash: requestData?.hash,
-    onSuccess: async (tx) => {
-      try {
-        startTransaction('Generation Started', 'Waiting for blocks before completing...');
-        setIsGenerating(false);
-      } catch (error) {
-        console.error('Generation success handler error:', error);
-        handleContractError(error);
-      }
-    },
-    onError: (error) => {
-      console.error('Generation transaction error:', error);
-      if (error.message.includes('could not be found')) {
-        startTransaction('Transaction Failed', 'The transaction was dropped. Please try again.');
-      } else {
-        handleContractError(error);
-      }
-      setIsGenerating(false);
-    },
-  });
+  const { write: completeGeneration, data: completeData } = useContractWrite(completeConfig);
 
-  const { isLoading: isCompletePending } = useWaitForTransaction({
+  const { isLoading: isCompleteLoading } = useWaitForTransaction({
     hash: completeData?.hash,
-    onSuccess: async (tx) => {
+    onSuccess: async (receipt) => {
+      // Check if we've already processed this transaction
+      if (processedTxHashes.has(receipt.transactionHash)) {
+        console.log('Transaction already processed:', receipt.transactionHash);
+        return;
+      }
+      
+      // Add this transaction to our processed set
+      processedTxHashes.add(receipt.transactionHash);
+      
+      // Prevent duplicate generations
+      if (isProcessingGeneration) {
+        return;
+      }
+      setIsProcessingGeneration(true);
+
       try {
-        // Show rarity information
-        const isLegendary = tx.blockHash?.endsWith('00') || false;
-        
-        // Generate the image
-        if (stabilityServiceRef.current) {
-          try {
-            const imageData = await stabilityServiceRef.current.generateImage(!!remixImage, remixImage || undefined);
-            setImageUrl(imageData);
-            setRemixImage(null);
-            
-            completeTransaction(true, isLegendary ? 
-              '🎉 Legendary Generation! Your prize pool winning image is ready!' : 
-              'Your generated image is ready!'
-            );
-          } catch (error) {
-            console.error('Error generating image:', error);
-            handleContractError(error);
-          }
+        console.log('Transaction receipt:', receipt);
+
+        // Find the GenerationComplete event
+        const generationEvent = receipt.logs.find(log => 
+          log.address.toLowerCase() === CONTRACT_ADDRESS.toLowerCase()
+        );
+
+        if (!generationEvent) {
+          console.error('GenerationComplete event not found in logs');
+          throw new Error('Generation event not found');
         }
 
-        setStatusUpdates(prev => [...prev, {
-          type: isLegendary ? 'legendary' : 'complete',
-          message: isLegendary ? '🎉 Legendary Generation! You won the prize pool!' : 'Generation completed successfully',
-          timestamp: Date.now()
-        }]);
+        console.log('Generation event:', generationEvent);
+
+        // Parse the event data
+        const eventData = decodeEventLog({
+          abi: CASTERS_PIXELS_ABI,
+          data: generationEvent.data,
+          topics: generationEvent.topics,
+        }) as { args: { isLegendary: boolean; reward: bigint } };
+
+        const isLegendary = eventData.args.isLegendary;
+        const reward = eventData.args.reward;
         
-        setIsCompleting(false);
+        console.log('Parsed values:', { isLegendary, reward });
+
+        // Wait for a few seconds to allow blocks to be mined
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        try {
+          setIsGenerating(true);
+          const prompt = generatePFPPrompt(isLegendary);
+          
+          console.log('Generating image with prompt:', prompt);
+          
+          const generatedImage = await stabilityService.current.generateImage(prompt, negativePrompt);
+          console.log('Image generated successfully');
+          setImageUrl(generatedImage);
+
+          // Show result message based on generation type
+          const message = isLegendary
+            ? '🎉 Congratulations! You got a LEGENDARY generation and won the prize pool!'
+            : 'Generation complete! Common generation.';
+          
+          console.log('Setting success message:', message);
+          setError(message);
+        } catch (error) {
+          console.error('Failed to generate image:', error);
+          setError('Failed to generate image, but your reward has been processed!');
+        } finally {
+          setIsGenerating(false);
+          setIsProcessingGeneration(false);
+          setIsTransactionProcessing(false);
+          setIsCompletionProcessing(false);
+        }
       } catch (error) {
-        console.error('Completion success handler error:', error);
-        handleContractError(error);
-        setIsCompleting(false);
+        console.error('Failed to process transaction:', error);
+        setError('Failed to process transaction. Please try again.');
+        setIsProcessingGeneration(false);
+        setIsTransactionProcessing(false);
+        setIsCompletionProcessing(false);
       }
     },
     onError: (error) => {
-      console.error('Completion transaction error:', error);
-      if (error.message.includes('could not be found')) {
-        startTransaction('Transaction Failed', 'The completion transaction was dropped. Please try again.');
-      } else {
-        handleContractError(error);
-      }
-      setIsCompleting(false);
+      console.error('Transaction failed:', error);
+      setError('Transaction failed. Please try again.');
+      setIsProcessingGeneration(false);
+      setIsTransactionProcessing(false);
+      setIsCompletionProcessing(false);
     },
   });
 
-  // Handle auto-completion
-  useEffect(() => {
-    const autoComplete = async () => {
-      if (!hasPendingGeneration || !canComplete || isCompleting || isCompletePending || !address) return;
-
-      try {
-        setIsCompleting(true);
-        startTransaction('Completing Generation', 'Waiting for completion...');
-        const { hash } = await completeGeneration();
-        updateTransaction(hash);
-      } catch (error: any) {
-        console.error('Auto-completion error:', error);
-        if (error.message.includes('Must wait for blocks')) {
-          startTransaction(
-            'Generation Pending',
-            `Please wait for ${blockWait?.toString() || 'more'} blocks before completing generation.`
-          );
-        } else if (error.message.includes('No pending generation')) {
-          // Silently ignore this error as it means the generation was already completed
-          setIsCompleting(false);
-        } else {
-          handleContractError(error);
-        }
-        setIsCompleting(false);
-      }
-    };
-
-    autoComplete();
-  }, [hasPendingGeneration, canComplete, completeGeneration, isCompletePending, address]);
-
-  // Check token balance
-  useEffect(() => {
-    const checkBalance = async () => {
-      if (!address || !alchemyServiceRef.current) return;
-
-      try {
-        const balance = await alchemyServiceRef.current.getTokenBalance(address);
-        if (balance < BigInt(generationCost)) {
-          startTransaction(
-            'Insufficient Balance',
-            `You need at least ${formatEther(generationCost)} CASTER tokens to generate`
-          );
-        }
-      } catch (error) {
-        console.error('Error checking balance:', error);
-      }
-    };
-
-    checkBalance();
-  }, [address]);
-
-  // Setup webhooks
-  useEffect(() => {
-    const setupWebhooks = async () => {
-      if (!alchemyServiceRef.current || !process.env.NEXT_PUBLIC_ALCHEMY_WEBHOOK_URL) return;
-
-      try {
-        await alchemyServiceRef.current.setupWebhooks(
-          process.env.NEXT_PUBLIC_ALCHEMY_WEBHOOK_URL
-        );
-      } catch (error) {
-        console.error('Error setting up webhooks:', error);
-      }
-    };
-
-    setupWebhooks();
-  }, []);
-
-  // Track transfer history
-  useEffect(() => {
-    const trackTransfers = async () => {
-      if (!address || !alchemyServiceRef.current) return;
-
-      try {
-        const transfers = await alchemyServiceRef.current.getTransferHistory(address);
-        console.log('Transfer history:', transfers);
-      } catch (error) {
-        console.error('Error getting transfer history:', error);
-      }
-    };
-
-    trackTransfers();
-  }, [address]);
-
-  // Handle generation request
-  const handleGenerate = async () => {
-    if (!address || !generationCost) {
-      handleContractError(new Error('Please connect your wallet first'));
-      return;
-    }
-
-    if (isGenerating || isApproving || isRequestPending || isCompletePending || isCompleting) {
-      startTransaction('Transaction Pending', 'Please wait for the current transaction to complete.');
-      return;
-    }
-
-    try {
-      // Check for pending generation
-      if (hasPendingGeneration) {
-        if (canComplete && !isCompletePending && !isCompleting) {
-          startTransaction(
-            'Generation Ready',
-            'Your generation is ready to complete. Processing...'
-          );
-          try {
-            setIsCompleting(true);
-            const { hash } = await completeGeneration();
-            updateTransaction(hash);
-          } catch (error: any) {
-            if (error.message.includes('No pending generation')) {
-              // Silently ignore this error as it means the generation was already completed
-              setIsCompleting(false);
-            } else {
-              handleContractError(error);
-            }
-            setIsCompleting(false);
-          }
-        } else {
-          startTransaction(
-            'Generation Pending',
-            `Please wait for ${blockWait?.toString() || 'more'} blocks before completing generation.`
-          );
-        }
-        return;
-      }
-
-      // Check CASTER balance
-      if (!balance || balance < generationCost) {
-        startTransaction(
-          'Insufficient Balance',
-          `You need ${formatEther(generationCost)} CASTER tokens to generate. Your balance: ${formatEther(balance || 0n)} CASTER`
-        );
-        return;
-      }
-
-      // Check allowance and only approve what's needed
-      if (!allowance || allowance < generationCost) {
-        setIsApproving(true);
-        const requiredApproval = generationCost - (allowance || 0n);
-        startTransaction(
-          'Approving CASTER', 
-          `Approving ${formatEther(requiredApproval)} CASTER tokens...`
-        );
-        try {
-          const { hash } = await approve({ 
-            args: [CONTRACT_ADDRESS, requiredApproval] 
-          });
-          updateTransaction(hash);
-        } catch (error: any) {
-          console.error('Approval error:', error);
-          handleContractError(error);
-          setIsApproving(false);
-          return;
-        }
-        setIsApproving(false);
-      }
-
-      setIsGenerating(true);
-      startTransaction('Generating', 'Waiting for generation and completion...');
-      try {
-        const { hash } = await requestGeneration();
-        updateTransaction(hash);
-      } catch (error: any) {
-        console.error('Generation request error:', error);
-        if (error.message.includes('AlreadyHasPendingGeneration')) {
-          if (canComplete) {
-            startTransaction(
-              'Generation Ready',
-              'Your generation is ready to complete. Processing...'
-            );
-          } else {
-            startTransaction(
-              'Generation Pending',
-              `Please wait for ${blockWait?.toString() || 'more'} blocks before completing generation.`
-            );
-          }
-        } else if (error.message.includes('InsufficientBalance')) {
-          handleContractError(new Error('Insufficient CASTER balance for generation.'));
-        } else {
-          handleContractError(error);
-        }
-      } finally {
-        setIsGenerating(false);
-      }
-    } catch (error: any) {
-      console.error('Generation error:', error);
-      handleContractError(error);
-      setIsGenerating(false);
-      setIsApproving(false);
-    }
-  };
-
-  // Handle generation complete from events
-  const handleGenerationComplete = async (isLegendary: boolean) => {
-    if (!stabilityServiceRef.current) return;
-    
-    try {
-      const imageData = await stabilityServiceRef.current.generateImage(!!remixImage, remixImage || undefined);
-      setImageUrl(imageData);
-      setRemixImage(null);
-      
-      completeTransaction(true, isLegendary ? 
-        '🎉 Legendary Generation! Your prize pool winning image is ready!' : 
-        'Your generated image is ready!'
-      );
-    } catch (error) {
-      console.error('Error generating image:', error);
-      handleContractError(error);
-    }
-    setIsGenerating(false);
-  };
-
-  // Contract events
-  useContractEvents(CONTRACT_ADDRESS, address, (update) => {
-    setStatusUpdates(prev => [...prev, update]);
-    
-    if (update.type === 'complete' || update.type === 'legendary') {
-      handleGenerationComplete(update.type === 'legendary');
-    }
+  const { data: generationCost } = useContractRead({
+    address: CONTRACT_ADDRESS as Address,
+    abi: CASTERS_PIXELS_ABI,
+    functionName: 'GENERATION_COST',
+    enabled: isConnected,
   });
 
-  if (!mounted) {
-    return null;
-  }
+  const formattedCost = generationCost ? Math.floor(Number(formatEther(generationCost))).toString() : '1000';
+
+  const { config } = usePrepareContractWrite({
+    address: CONTRACT_ADDRESS as Address,
+    abi: CASTERS_PIXELS_ABI,
+    functionName: 'requestGeneration',
+    enabled: isConnected && !!address && !hasPending && !isGenerating,
+    gas: undefined, // Let Base estimate gas
+    gasPrice: undefined, // Use network's suggested gas price
+    onError: (error) => {
+      console.error('Gas estimation error:', error);
+    },
+    onSuccess: (data) => {
+      console.log('Gas estimation:', {
+        gasLimit: data.gasLimit,
+        gasPrice: data.gasPrice,
+      });
+    },
+  });
+
+  const { write: generate, data: transactionData } = useContractWrite({
+    ...config,
+    onError: (error) => {
+      console.error('Write error:', error);
+    },
+    onSuccess: (data) => {
+      console.log('Write success:', data);
+    },
+  });
+
+  const { isLoading: isTransactionPending } = useWaitForTransaction({
+    hash: transactionData?.hash,
+  });
+
+  const handleGenerate = async () => {
+    if (!generate || !address) return;
+    
+    setError(null);
+    setIsTransactionProcessing(true);
+    try {
+      generate();
+    } catch (err) {
+      console.error('Generation error:', err);
+      setError('Failed to start generation. Please try again.');
+      setIsTransactionProcessing(false);
+    }
+  };
+
+  const handleComplete = async () => {
+    if (!completeGeneration) return;
+    try {
+      setError(null);
+      setIsCompletionProcessing(true);
+      completeGeneration();
+    } catch (err) {
+      console.error('Failed to complete generation:', err);
+      setError('Failed to complete generation. Please try again.');
+      setIsCompletionProcessing(false);
+    }
+  };
 
   return (
-    <main className="min-h-screen bg-black text-white">
-      {/* Header */}
-      <div className="fixed left-0 top-0 w-full z-50">
-        <div className="flex justify-between items-center px-6 py-4 bg-gray-900 border-b border-gray-800">
-          <h1 className="text-2xl font-bold">Casters Pixels</h1>
-          <ConnectButton />
-        </div>
-      </div>
+    <main className="flex min-h-screen flex-col items-center p-4 relative">
+      <ParticleBackground />
+      <div style={{
+        width: '100%',
+        maxWidth: '90%',
+        margin: '0 auto',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        position: 'relative',
+        zIndex: 1
+      }}>
+        <div className="z-10 w-full max-w-5xl items-center justify-between text-sm lg:flex">
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            width: '100%',
+          }}>
+            <h1 className="rainbow-stroke-text" style={{
+              fontSize: '2.5rem',
+              margin: 0,
+              fontWeight: 'bold',
+            }}>
+              CASTERS PIXELS
+            </h1>
+            <ConnectButton />
+          </div>
 
-      <NetworkStatus />
+          {/* Stats Component with centered container */}
+          <div className="neon-container" style={{
+            width: '100%',
+            display: 'flex',
+            justifyContent: 'center',
+            marginBottom: '20px',
+            padding: '20px',
+          }}>
+            <Stats />
+          </div>
 
-      {/* Main Content */}
-      <div className="container mx-auto px-4 pt-24">
-        {/* Stats */}
-        <Stats />
+          {(isConnected && (hasPending || isTransactionProcessing)) && (
+            <>
+              <div className="neon-warning" style={{
+                padding: '15px',
+                borderRadius: '10px',
+                marginBottom: '20px',
+                width: '100%',
+                textAlign: 'center'
+              }}>
+                Generation in progress... Once the "Complete Generation" button appears, click it to finish the process.
+              </div>
+            </>
+          )}
 
-        <TransactionModal
-          isOpen={txState.isOpen}
-          title={txState.title}
-          message={txState.message}
-          status={txState.status}
-          txHash={txState.txHash}
-          onClose={closeModal}
-        />
+          {error && (
+            <div className={`${error.includes('Congratulations') ? 'neon-success' : error.includes('complete') ? 'neon-warning' : 'neon-error'}`} style={{
+              padding: '15px',
+              borderRadius: '10px',
+              marginBottom: '20px',
+              width: '100%',
+              textAlign: 'center'
+            }}>
+              {error}
+            </div>
+          )}
 
-        {/* Status Updates */}
-        <div className="mb-8">
-          <StatusUpdates updates={statusUpdates} />
-        </div>
+          {/* Image display section */}
+          {imageUrl ? (
+            <div className="neon-image-container" style={{
+              width: '400px',
+              height: '400px',
+              marginBottom: '20px',
+              margin: '20px auto'
+            }}>
+              <Image
+                src={imageUrl}
+                alt="Generated PFP"
+                fill
+                style={{ objectFit: 'contain' }}
+              />
+            </div>
+          ) : (
+            <div className="neon-container" style={{
+              width: '400px',
+              height: '400px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '10px',
+              marginBottom: '20px',
+              margin: '20px auto',
+              textAlign: 'center'
+            }}>
+              {isGenerating ? 'Generating...' : 'Your generated PFP will appear here'}
+            </div>
+          )}
 
-        {/* Generation Interface */}
-        <div className="flex flex-col items-center gap-6 mb-8">
-          <div className="flex flex-col items-center">
+          {/* Buttons container */}
+          <div style={{
+            display: 'flex',
+            gap: '20px',
+            justifyContent: 'center',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            width: '100%'
+          }}>
             <button
               onClick={handleGenerate}
-              disabled={!address || isGenerating || isApproving || isRequestPending || isCompletePending || isCompleting}
-              className="text-xl font-semibold bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              disabled={!isConnected || isGenerating || isTransactionPending || isTransactionProcessing || (isConnected && hasPending)}
+              className="neon-button"
+              style={{
+                width: '200px',
+                borderColor: 'var(--neon-green)',
+                boxShadow: (!isConnected || isGenerating || isTransactionPending || isTransactionProcessing || (isConnected && hasPending)) ? 'none' : 
+                  '0 0 5px var(--neon-green), inset 0 0 5px var(--neon-green)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                padding: '10px 20px'
+              }}
             >
-              {isApproving ? 'Approving...' : 
-               isGenerating || isRequestPending || isCompletePending || isCompleting ? 'Processing...' : 
-               remixImage ? 'Generate Remix' : 
-               generationCost ? `Generate New (${formatEther(generationCost)} CASTER)` : 'Loading...'}
+              {isGenerating 
+                ? 'Generating...' 
+                : isTransactionProcessing || isTransactionPending
+                  ? 'Transaction Pending...'
+                  : (isConnected && hasPending)
+                    ? 'Generation Pending'
+                    : (
+                      <>
+                        Generate PFP
+                        <span style={{ 
+                          fontSize: '0.8em',
+                          opacity: 0.8,
+                          marginTop: '4px'
+                        }}>
+                          ({formattedCost} CASTER)
+                        </span>
+                      </>
+                    )}
             </button>
-            {address && balance && generationCost && balance < generationCost && (
-              <p className="mt-2 text-red-500">
-                Insufficient CASTER balance. You need {formatEther(generationCost)} CASTER to generate.
-              </p>
-            )}
-          </div>
-        </div>
 
-        {/* Image Upload */}
-        {!isGenerating && !isRequestPending && !isCompletePending && !isCompleting && (
-          <div className="max-w-xl mx-auto mb-8">
-            <ImageUpload
-              onImageSelect={(imageData) => setRemixImage(imageData)}
-            />
-          </div>
-        )}
-
-        {/* Generated Image */}
-        {imageUrl && (
-          <div className="max-w-2xl mx-auto mb-8">
-            <img src={imageUrl} alt="Generated" className="w-full rounded-lg shadow-xl mb-4" />
-            {generatedHash && (
-              <div className="text-center mb-4">
-                <p className="text-lg">
-                  {generatedHash.endsWith('00') ? 
-                    '🎉 Legendary Generation! You won the prize pool!' : 
-                    'Standard Generation'}
-                </p>
-                <p className="text-sm text-gray-400">
-                  Generation Hash: {generatedHash}
-                </p>
-              </div>
-            )}
-            <div className="text-center">
-              <a
-                href={imageUrl}
-                download="generation.png"
-                className="inline-block bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
+            {isConnected && hasPending && (
+              <button
+                onClick={handleComplete}
+                disabled={isCompleteLoading || isCompletionProcessing}
+                className="neon-button"
+                style={{
+                  width: '200px',
+                  borderColor: 'var(--neon-orange)',
+                  boxShadow: isCompleteLoading || isCompletionProcessing ? 'none' : 
+                    '0 0 5px var(--neon-orange), inset 0 0 5px var(--neon-orange)'
+                }}
               >
-                Download Image
-              </a>
-            </div>
+                {isCompleteLoading || isCompletionProcessing ? 'Completing...' : 'Complete Generation'}
+              </button>
+            )}
+
+            {imageUrl && (
+              <button
+                onClick={() => {
+                  if (!imageUrl) return;
+                  const link = document.createElement('a');
+                  link.href = imageUrl;
+                  link.download = 'casters-pfp.png';
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                }}
+                className="neon-button"
+                style={{
+                  width: '200px',
+                  borderColor: 'var(--neon-blue)'
+                }}
+              >
+                Download PFP
+              </button>
+            )}
           </div>
-        )}
+
+          <p style={{ 
+            textAlign: 'center', 
+            color: '#888',
+            fontSize: '0.9rem',
+            marginTop: '20px'
+          }}>
+            Generate a unique AI PFP for a chance to win CASTER tokens! (Cost: {formattedCost} CASTER)
+            <br />
+            <small>Note: This generates an AI image that you can download. The image is not automatically minted as an NFT.</small>
+          </p>
+        </div>
       </div>
     </main>
   );

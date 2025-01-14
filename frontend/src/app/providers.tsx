@@ -1,6 +1,6 @@
 'use client';
 
-import { getDefaultWallets, RainbowKitProvider, connectorsForWallets } from '@rainbow-me/rainbowkit';
+import { getDefaultWallets, RainbowKitProvider } from '@rainbow-me/rainbowkit';
 import { configureChains, createConfig, WagmiConfig } from 'wagmi';
 import { base } from 'wagmi/chains';
 import { alchemyProvider } from 'wagmi/providers/alchemy';
@@ -11,12 +11,17 @@ if (!process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID) {
   throw new Error('WalletConnect Project ID is required');
 }
 
-const { chains, publicClient } = configureChains(
+const { chains, publicClient, webSocketPublicClient } = configureChains(
   [base],
   [
     alchemyProvider({ apiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || '' }),
     publicProvider(),
-  ]
+  ],
+  {
+    batch: { multicall: false }, 
+    pollingInterval: 12_000, 
+    retryCount: 1, 
+  }
 );
 
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
@@ -28,15 +33,16 @@ const { connectors } = getDefaultWallets({
   chains,
 });
 
-const wagmiConfig = createConfig({
-  autoConnect: true,
+const config = createConfig({
+  autoConnect: false, 
   connectors,
   publicClient,
+  webSocketPublicClient,
 });
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <WagmiConfig config={wagmiConfig}>
+    <WagmiConfig config={config}>
       <RainbowKitProvider chains={chains}>
         {children}
       </RainbowKitProvider>

@@ -19,7 +19,8 @@ export function useContractEvents(
   onStatus?: (update: StatusUpdate) => void
 ) {
   const handleGenerationRequested = useCallback(
-    (user: string, blockNumber: bigint) => {
+    (...args: any[]) => {
+      const [user, blockNumber] = args;
       if (userAddress && user.toLowerCase() !== userAddress.toLowerCase()) return;
       onStatus?.({
         type: 'request',
@@ -36,11 +37,12 @@ export function useContractEvents(
     address: contractAddress as `0x${string}`,
     abi: CASTERS_PIXELS_ABI,
     eventName: 'GenerationRequested',
-    listener: handleGenerationRequested as (user: string, blockNumber: bigint) => void,
+    listener: handleGenerationRequested,
   });
 
   const handleGenerationComplete = useCallback(
-    (user: string, isLegendary: boolean, reward: bigint) => {
+    (...args: any[]) => {
+      const [user, isLegendary, reward] = args;
       if (userAddress && user.toLowerCase() !== userAddress.toLowerCase()) return;
       onStatus?.({
         type: isLegendary ? 'legendary' : 'complete',
@@ -59,11 +61,12 @@ export function useContractEvents(
     address: contractAddress as `0x${string}`,
     abi: CASTERS_PIXELS_ABI,
     eventName: 'GenerationComplete',
-    listener: handleGenerationComplete as (user: string, isLegendary: boolean, reward: bigint) => void,
+    listener: handleGenerationComplete,
   });
 
   const handlePrizePoolUpdated = useCallback(
-    (newAmount: bigint) => {
+    (...args: any[]) => {
+      const [newAmount] = args;
       onStatus?.({
         type: 'prizepool',
         prizePool: newAmount,
@@ -78,6 +81,6 @@ export function useContractEvents(
     address: contractAddress as `0x${string}`,
     abi: CASTERS_PIXELS_ABI,
     eventName: 'PrizePoolUpdated',
-    listener: handlePrizePoolUpdated as (newAmount: bigint) => void,
+    listener: handlePrizePoolUpdated,
   });
 }

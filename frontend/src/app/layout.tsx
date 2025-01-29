@@ -1,6 +1,7 @@
 import '@rainbow-me/rainbowkit/styles.css';
 import { Providers } from './providers';
 import './globals.css';
+import '../styles/neon.css';
 
 export const metadata = {
   title: 'Casters Pixels',
@@ -14,7 +15,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>
+      <body className="neon-background">
         <Providers>{children}</Providers>
       </body>
     </html>

@@ -23,7 +23,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const { address, isConnected } = useAccount();
   const [isProcessingGeneration, setIsProcessingGeneration] = useState(false);
-  const [processedTxHashes, setProcessedTxHashes] = useState(new Set<string>());
+  const [processedTxHashes] = useState(new Set<string>());
   const [isTransactionProcessing, setIsTransactionProcessing] = useState(false);
   const [isCompletionProcessing, setIsCompletionProcessing] = useState(false);
 
@@ -59,7 +59,7 @@ export default function Home() {
       }
       
       // Add this transaction to our processed set
-      setProcessedTxHashes((prevTxHashes) => new Set([...prevTxHashes, receipt.transactionHash]));
+      processedTxHashes.add(receipt.transactionHash);
       
       // Prevent duplicate generations
       if (isProcessingGeneration) {
@@ -209,7 +209,7 @@ export default function Home() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col items-center p-4 relative">
+    <main className="flex min-h-screen flex-col items-center p-4 relative neon-background">
       <ParticleBackground />
       <div style={{
         width: '100%',
@@ -345,7 +345,7 @@ export default function Home() {
                           ({formattedCost} CASTER)
                         </span>
                       </div>
-                    )} 
+                    )}
             </button>
 
             {isConnected && hasPending && (

@@ -1,6 +1,7 @@
 import { useContractEvent } from 'wagmi';
 import { useCallback } from 'react';
 import { CASTERS_PIXELS_ABI } from '../constants/abis';
+import { formatEther } from 'viem';
 
 export type StatusUpdate = {
   type: 'request' | 'complete' | 'error' | 'legendary' | 'prizepool';
@@ -8,6 +9,8 @@ export type StatusUpdate = {
   blockNumber?: number;
   reward?: bigint;
   prizePool?: bigint;
+  timestamp: number;
+  message: string;
 };
 
 export function useContractEvents(
@@ -22,6 +25,8 @@ export function useContractEvents(
         type: 'request',
         address: user,
         blockNumber: Number(blockNumber),
+        timestamp: Date.now(),
+        message: `Generation requested by ${user.slice(0, 6)}...${user.slice(-4)}`,
       });
     },
     [onStatus, userAddress]
@@ -41,6 +46,10 @@ export function useContractEvents(
         type: isLegendary ? 'legendary' : 'complete',
         address: user,
         reward,
+        timestamp: Date.now(),
+        message: isLegendary 
+          ? `🎉 LEGENDARY generation by ${user.slice(0, 6)}...${user.slice(-4)}! Won ${formatEther(reward)} CASTER!`
+          : `Generation completed by ${user.slice(0, 6)}...${user.slice(-4)}`,
       });
     },
     [onStatus, userAddress]
@@ -58,6 +67,8 @@ export function useContractEvents(
       onStatus?.({
         type: 'prizepool',
         prizePool: newAmount,
+        timestamp: Date.now(),
+        message: `Prize pool updated to ${formatEther(newAmount)} CASTER`,
       });
     },
     [onStatus]

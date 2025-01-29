@@ -23,7 +23,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const { address, isConnected } = useAccount();
   const [isProcessingGeneration, setIsProcessingGeneration] = useState(false);
-  const [processedTxHashes] = useState(new Set<string>());
+  const [processedTxHashes, setProcessedTxHashes] = useState(new Set<string>());
   const [isTransactionProcessing, setIsTransactionProcessing] = useState(false);
   const [isCompletionProcessing, setIsCompletionProcessing] = useState(false);
 
@@ -59,7 +59,7 @@ export default function Home() {
       }
       
       // Add this transaction to our processed set
-      processedTxHashes.add(receipt.transactionHash);
+      setProcessedTxHashes((prevTxHashes) => new Set([...prevTxHashes, receipt.transactionHash]));
       
       // Prevent duplicate generations
       if (isProcessingGeneration) {
@@ -109,7 +109,7 @@ export default function Home() {
 
           // Show result message based on generation type
           const message = isLegendary
-            ? '🎉 Congratulations! You got a LEGENDARY generation and won the prize pool!'
+            ? ' Congratulations! You got a LEGENDARY generation and won the prize pool!'
             : 'Generation complete! Common generation.';
           
           console.log('Setting success message:', message);
@@ -250,17 +250,15 @@ export default function Home() {
           </div>
 
           {(isConnected && (hasPending || isTransactionProcessing)) && (
-            <>
-              <div className="neon-warning" style={{
-                padding: '15px',
-                borderRadius: '10px',
-                marginBottom: '20px',
-                width: '100%',
-                textAlign: 'center'
-              }}>
-                Generation in progress... Once the "Complete Generation" button appears, click it to finish the process.
-              </div>
-            </>
+            <div className="neon-warning" style={{
+              padding: '15px',
+              borderRadius: '10px',
+              marginBottom: '20px',
+              width: '100%',
+              textAlign: 'center'
+            }}>
+              Generation in progress... Once the "Complete Generation" button appears, click it to finish the process.
+            </div>
           )}
 
           {error && (
@@ -337,7 +335,7 @@ export default function Home() {
                   : (isConnected && hasPending)
                     ? 'Generation Pending'
                     : (
-                      <>
+                      <div>
                         Generate PFP
                         <span style={{ 
                           fontSize: '0.8em',
@@ -346,8 +344,8 @@ export default function Home() {
                         }}>
                           ({formattedCost} CASTER)
                         </span>
-                      </>
-                    )}
+                      </div>
+                    )} 
             </button>
 
             {isConnected && hasPending && (

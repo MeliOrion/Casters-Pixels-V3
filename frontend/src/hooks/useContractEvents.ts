@@ -31,7 +31,7 @@ export function useContractEvents(
     address: contractAddress as `0x${string}`,
     abi: CASTERS_PIXELS_ABI,
     eventName: 'GenerationRequested',
-    listener: handleGenerationRequested,
+    listener: handleGenerationRequested as (user: string, blockNumber: bigint) => void,
   });
 
   const handleGenerationComplete = useCallback(
@@ -50,7 +50,7 @@ export function useContractEvents(
     address: contractAddress as `0x${string}`,
     abi: CASTERS_PIXELS_ABI,
     eventName: 'GenerationComplete',
-    listener: handleGenerationComplete,
+    listener: handleGenerationComplete as (user: string, isLegendary: boolean, reward: bigint) => void,
   });
 
   const handlePrizePoolUpdated = useCallback(
@@ -67,6 +67,6 @@ export function useContractEvents(
     address: contractAddress as `0x${string}`,
     abi: CASTERS_PIXELS_ABI,
     eventName: 'PrizePoolUpdated',
-    listener: handlePrizePoolUpdated,
+    listener: handlePrizePoolUpdated as (newAmount: bigint) => void,
   });
 }

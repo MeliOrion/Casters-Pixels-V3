@@ -70,13 +70,34 @@ export default function Home() {
       try {
         console.log('Transaction receipt:', receipt);
 
-        // Find the GenerationComplete event
-        const generationEvent = receipt.logs.find(log => 
-          log.address.toLowerCase() === CONTRACT_ADDRESS.toLowerCase()
-        );
+        // Wait for a few seconds to ensure the receipt is available
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        // Find the GenerationComplete event with retries
+        let generationEvent = null;
+        let retries = 3;
+        
+        while (retries > 0 && !generationEvent) {
+          try {
+            generationEvent = receipt.logs.find(log => 
+              log.address.toLowerCase() === CONTRACT_ADDRESS.toLowerCase()
+            );
+
+            if (!generationEvent) {
+              console.log(`Retry ${4 - retries}: GenerationComplete event not found, waiting...`);
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              retries--;
+            }
+          } catch (error) {
+            console.error(`Error finding event, retry ${4 - retries}:`, error);
+            retries--;
+            if (retries === 0) throw error;
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        }
 
         if (!generationEvent) {
-          console.error('GenerationComplete event not found in logs');
+          console.error('GenerationComplete event not found in logs after retries');
           throw new Error('Generation event not found');
         }
 
@@ -93,9 +114,6 @@ export default function Home() {
         const reward = eventData.args.reward;
         
         console.log('Parsed values:', { isLegendary, reward });
-
-        // Wait for a few seconds to allow blocks to be mined
-        await new Promise(resolve => setTimeout(resolve, 5000));
 
         try {
           setIsGenerating(true);
@@ -345,7 +363,7 @@ export default function Home() {
                           ({formattedCost} CASTER)
                         </span>
                       </div>
-                    )}
+                    )} 
             </button>
 
             {isConnected && hasPending && (
